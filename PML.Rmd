@@ -8,7 +8,7 @@ This report is part of the homework assignment for Coursera's  Practical Machine
 
 Scripts have been produced and tested on RSudio Version 0.98.1062 and Windows 7.
 
-Github: 
+Github: https://github.com/jpzonneveld/PML_Project/
 
 # Human Activity Recognition - A short study
 ## Background
