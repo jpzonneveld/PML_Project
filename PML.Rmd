@@ -1,0 +1,173 @@
+---
+title: "Practical Machine Learning: Peer Assessment"
+author: "Jeroen Zonneveld"
+date: "October, 2015"
+output: html_document
+---
+This report is part of the homework assignment for Coursera's  Practical Machine Learning Course by the Johns Hopkins University. For more information about this Specialization, please visit the Coursera [website](https://www.coursera.org/specialization/jhudatascience/)
+
+Scripts have been produced and tested on RSudio Version 0.98.1062 and Windows 7.
+
+Github: 
+
+# Human Activity Recognition - A short study
+## Background
+Using devices such as *Jawbone Up, Nike FuelBand,* and *Fitbit* it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the [website](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset). [1]
+
+The goal of this project is to predict how the participants did the exercise. This is the *classe* variable of the data set, which classifies the outcomes into five categories:
+
+- Class A - Exactly according to the specification.
+- Class B - Throwing the elbows to the front.
+- Class C - Lifting the dumbbell only halfway.
+- Class D - Lowering the dumbbell only halfway.
+- Class E - Throwing the hips to the front.
+
+This report describes the model, its cross validation, expected out of sample error calculation, and the choices made. 
+
+## Settings
+```{r Settings, message = FALSE, warning = FALSE}
+echo = TRUE             # Ensure code is always visible
+set.seed(1910)          # Ensure reproducibility
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+```
+
+## Data Preparation
+The training data for this project are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) (11.6 MB)
+
+The test data are available [here](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv) (14.8 kB)
+
+### Data Loading
+First we check if the data file is already in our working directory; if not we download it. Next we load the data, interpreting `NA`, `#DIV/0!` and empty fields as `NA` 
+```{r data_ingest}
+if(!file.exists("pml-training.csv"))
+   download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", 
+   destfile="pml-training.csv")
+
+if(!file.exists("pml-testing.csv"))
+   download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", 
+   destfile="pml-testing.csv")
+
+training <- read.csv("pml-training.csv", na.strings = c("NA", "#DIV/0!", ""))
+testing  <- read.csv("pml-testing.csv",  na.strings = c("NA", "#DIV/0!", ""))
+```
+
+### Data exploration
+The training set contains 19622 observations of 160 variables.
+
+The testing set contains 20 observations of 160 variables.
+
+We take a quick look at the data. Note that for reporting purposes the list has been truncated.
+
+```{r data_str}
+str(training, list.len=15)
+```
+We see that there are a lot of missing values in our data set. We will clean the data set in the *Data Cleaning* chapter below. Also note that the first 7 columns only contain 'record keeping data' which is not of interest to us.
+
+Since we are interested in predicting the *classe* variable, let's take a look at the distribution of that data in the training set.
+
+```{r data_classe}
+table(training$classe)
+plot(training$classe, main="Bar Plot of levels of the variable classe within the training set", xlab="classe levels", ylab="Frequency")
+```
+
+We can see that the distribution is fairly even, so we don't have to account for a skew in the data set.
+
+### Data cleaning
+Since a lot of data is missing, we discard all variables with over 50% of data missing. Also we remove the first 7 columns of the data sets.
+
+```{r data_clean}
+discard = colSums(is.na(training))/19662 >= 0.5
+training <- training[, discard == FALSE]
+testing <- testing[, discard == FALSE]
+training <- training[, -c(1:7)]
+testing <- testing[, -c(1:7)]
+```
+
+After cleaning our training set contains 19622 observations of 53 variables. 
+
+The testing set contains 20 observations of 53 variables.
+
+### Partitioning the training data for cross-validation
+For cross-validation purposes, the training data set will be partitioned into 2 sets. We randomly subsample 60% of the data for training our model, and use the remaining 40% for testing, evaluation and accuracy measurement. Since we have a large volume of observations we can subsample without substitution.
+
+```{r data_partition}
+subsamples <- createDataPartition(y=training$classe, p=0.6, list=FALSE)
+subTraining <- training[subsamples, ]; subTesting <- training[-subsamples, ]
+dim(subTraining); dim(subTesting)
+```
+
+## Modeling
+We are now ready to start modeling. We will explore two different models in this report. First a Decision Tree model will be applied to the data. Next we will look at a Random Forest model. We will compare the performance of both models and decide which model will work best.
+
+### Model 1: Decision Tree model
+First we train the model. Next we plot the Decision Tree and finally we make predictions on our subTesting data and see how the model behaved.
+
+```{r modeling_DT}
+modelDT <- rpart(classe ~ ., data=subTraining, method="class")
+rpart.plot(modelDT, main="Decision Tree")
+
+predictionDT <- predict(modelDT, subTesting, type="class")
+confusionMatrix(predictionDT, subTesting$classe)
+```
+
+### Model 2: Random Forest model
+First we train the model. Next we make predictions on our subTesting data and see how the model behaved.
+
+```{r modeling_RF}
+modelRF <- randomForest(classe ~ ., data=subTraining, method="class")
+predictionRF <- predict(modelRF, subTesting, type="class")
+confusionMatrix(predictionRF, subTesting$classe)
+```
+
+### Out-of-sample error rate
+Since the subTesting set was not used for training and optimizing the model, we can use this set to give an unbiased estimate of the model's prediction accuracy. The out-of-sample error rate is derived by the formula: 100% - Accuracy. Below we calculate it directly from the data.
+
+```{r modeling_OOS}
+missClass = function(values, predicted) {
+  round(100* (sum(predicted != values) / length(values)), digits = 2)
+}
+OOS_errRateDT = missClass(subTesting$classe, predictionDT)
+OOS_errRateRF = missClass(subTesting$classe, predictionRF)
+# Out-of-Sample Error Rate for Decision Tree model
+OOS_errRateDT 
+# Out-of-Sample Error Rate for Random Forest model
+OOS_errRateRF
+```
+
+## Conclusion
+As expected the Random Forest model performed better than the Decision Tree model. 
+
+The accuracy of the Decision Tree was 74,06 % and the expected out-of-sample error rate was 25,94%
+
+The accuracy of the Random Forest was 99,41% and the expected out-of-sample error rate was 0,59%
+
+Our testing data set comprises 20 cases. With an accuracy above 99% on our cross-validation data, we can expect that very few to none, of the test samples will be misclassified. The results of the test dataset submitted to Coursera can be found in the Appendix.
+
+## References
+[1] Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. *Qualitative Activity Recognition of Weight Lifting Exercises.* Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13) . Stuttgart, Germany: ACM SIGCHI, 2013.
+
+## Appendix
+For the Coursera course, a requirement was to use the testing data set and submit a prediction for each of the observations in this set. The predicition is checked by Coursera against the actual value.  Below are the predictions made by the Random Forest model.
+
+```{r appendix_predictions}
+predictionSubmission <- predict(modelRF, testing, type="class")
+predictionSubmission
+```
+
+For each test observation a single file had to be create with the prediction value. The following code was used to generate these files.
+
+```{r appendix_files}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(predictionSubmission)
+```
